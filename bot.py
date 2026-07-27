@@ -81,10 +81,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         )
         return ConversationHandler.END
 
-    # В остальных случаях (новый или declined) – начинаем регистрацию заново
+    # В остальных случаях – регистрация
     await update.message.reply_text(
         texts["welcome"],
         reply_markup=ReplyKeyboardRemove(),
+        parse_mode="HTML",
         disable_web_page_preview=True
     )
     await update.message.reply_text(texts["ask_name"])
@@ -108,7 +109,6 @@ async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE
     full_name = context.user_data.get("full_name", "")
 
     if text == texts["confirm_yes"]:
-        # Перезаписываем данные (даже если ранее был declined)
         users[user_id] = {
             "full_name": full_name,
             "registered": True,
@@ -116,7 +116,8 @@ async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE
         save_users(users)
         await update.message.reply_text(
             texts["confirm_thanks"],
-            reply_markup=ReplyKeyboardRemove()
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode="HTML"
         )
         await update.message.reply_text(
             texts["main_menu_title"],
@@ -173,9 +174,15 @@ async def handle_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             disable_web_page_preview=True
         )
     elif text == texts["menu_program"]:
-        await update.message.reply_text(texts["program_text"])
+        await update.message.reply_text(
+            texts["program_text"],
+            parse_mode="HTML"
+        )
     elif text == texts["menu_dresscode"]:
-        await update.message.reply_text(texts["dresscode_text"])
+        await update.message.reply_text(
+            texts["dresscode_text"],
+            parse_mode="HTML"
+        )
     else:
         await update.message.reply_text("Используйте кнопки меню.")
 
@@ -195,14 +202,19 @@ async def send_scheduled_message(application: Application, text_key: str, only_c
             continue
         try:
             msg = texts[text_key]
-            await application.bot.send_message(chat_id=int(uid), text=msg, parse_mode="Markdown")
+            await application.bot.send_message(
+                chat_id=int(uid),
+                text=msg,
+                parse_mode="HTML",
+                disable_web_page_preview=True
+            )
         except Exception as e:
             logger.error(f"Ошибка отправки {uid}: {e}")
 
 def schedule_jobs(application: Application):
     scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
 
-    # 27 июля 18:30 – тестовый
+    # 27 июля 18:30 – тест
     reminder_time = datetime(2026, 7, 30, 18, 30, tzinfo=timezone(timedelta(hours=3)))
     scheduler.add_job(
         send_scheduled_message,
