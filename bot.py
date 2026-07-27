@@ -28,7 +28,7 @@ if NOTIFICATION_CHAT_ID:
     NOTIFICATION_CHAT_ID = int(NOTIFICATION_CHAT_ID)
 USERS_FILE = os.getenv("USERS_FILE", "users.json")
 TEXTS_FILE = os.getenv("TEXTS_FILE", "texts.json")
-PROXY_URL = os.getenv("PROXY_URL")  # например, socks5://...
+PROXY_URL = os.getenv("PROXY_URL")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -51,49 +51,37 @@ def save_users(users):
 
 users = load_users()
 
-# ========== Состояния для ConversationHandler ==========
-(
-    ASK_NAME,
-    ASK_CONFIRMATION,
-) = range(2)
+# ========== Состояния ==========
+ASK_NAME, ASK_CONFIRMATION = range(2)
 
 # ========== Клавиатуры ==========
 def get_main_menu_keyboard():
-    keyboard = [
+    return ReplyKeyboardMarkup([
         [texts["menu_location"]],
         [texts["menu_program"]],
         [texts["menu_dresscode"]],
-    ]
-    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    ], resize_keyboard=True)
 
 def get_confirmation_keyboard():
-    keyboard = [
+    return ReplyKeyboardMarkup([
         [texts["confirm_yes"]],
         [texts["confirm_no"]],
-    ]
-    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    ], resize_keyboard=True)
 
 # ========== Обработчики регистрации ==========
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = str(update.effective_user.id)
     user_data = users.get(user_id)
 
-    if user_data:
-        if user_data.get("registered") is True:
-            await update.message.reply_text(
-                texts["main_menu_title"],
-                reply_markup=get_main_menu_keyboard()
-            )
-            return ConversationHandler.END
-        else:
-            # Пользователь уже отказался
-            await update.message.reply_text(
-                "Вы уже сообщили, что не сможете прийти. Спасибо, что сообщили.",
-                reply_markup=ReplyKeyboardRemove()
-            )
-            return ConversationHandler.END
+    # Если уже подтвердил – в меню
+    if user_data and user_data.get("registered") is True:
+        await update.message.reply_text(
+            texts["main_menu_title"],
+            reply_markup=get_main_menu_keyboard()
+        )
+        return ConversationHandler.END
 
-    # Новая регистрация
+    # В остальных случаях (новый или declined) – начинаем регистрацию заново
     await update.message.reply_text(
         texts["welcome"],
         reply_markup=ReplyKeyboardRemove(),
@@ -120,6 +108,7 @@ async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE
     full_name = context.user_data.get("full_name", "")
 
     if text == texts["confirm_yes"]:
+        # Перезаписываем данные (даже если ранее был declined)
         users[user_id] = {
             "full_name": full_name,
             "registered": True,
@@ -135,9 +124,7 @@ async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         await send_notification(
             context.application,
-            f"✅ Новый участник подтвердил участие!\n"
-            f"ID: {user_id}\n"
-            f"Имя: {full_name}"
+            f"✅ Участник подтвердил участие (или повторно)!\nID: {user_id}\nИмя: {full_name}"
         )
         return ConversationHandler.END
 
@@ -153,9 +140,7 @@ async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         await send_notification(
             context.application,
-            f"❌ Участник отказался от участия.\n"
-            f"ID: {user_id}\n"
-            f"Имя: {full_name}"
+            f"❌ Участник отказался (или повторно).\nID: {user_id}\nИмя: {full_name}"
         )
         return ConversationHandler.END
 
@@ -179,25 +164,18 @@ async def handle_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if text == texts["menu_location"]:
-        location_text = texts["location_text"]
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton(
-                texts["location_button"],
-                url=texts["location_map_url"]
-            )]
+            [InlineKeyboardButton(texts["location_button"], url=texts["location_map_url"])]
         ])
         await update.message.reply_text(
-            location_text,
+            texts["location_text"],
             reply_markup=keyboard,
             disable_web_page_preview=True
         )
-
     elif text == texts["menu_program"]:
         await update.message.reply_text(texts["program_text"])
-
     elif text == texts["menu_dresscode"]:
         await update.message.reply_text(texts["dresscode_text"])
-
     else:
         await update.message.reply_text("Используйте кнопки меню.")
 
@@ -206,9 +184,8 @@ async def send_notification(application: Application, text: str):
     if NOTIFICATION_CHAT_ID:
         try:
             await application.bot.send_message(chat_id=NOTIFICATION_CHAT_ID, text=text)
-            logger.info(f"Уведомление отправлено в чат {NOTIFICATION_CHAT_ID}")
         except Exception as e:
-            logger.error(f"Ошибка отправки уведомления в чат {NOTIFICATION_CHAT_ID}: {e}")
+            logger.error(f"Ошибка уведомления: {e}")
 
 # ========== Планировщик ==========
 async def send_scheduled_message(application: Application, text_key: str, only_confirmed=True):
@@ -216,7 +193,6 @@ async def send_scheduled_message(application: Application, text_key: str, only_c
     for uid, data in users_data.items():
         if only_confirmed and not data.get("registered"):
             continue
-        # Для финального спасибо отправляем всем (включая отказавшихся)
         try:
             msg = texts[text_key]
             await application.bot.send_message(chat_id=int(uid), text=msg, parse_mode="Markdown")
@@ -226,15 +202,15 @@ async def send_scheduled_message(application: Application, text_key: str, only_c
 def schedule_jobs(application: Application):
     scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
 
-    # 27 июля в 18:00 – тест (только подтвердившим)
-    reminder_time = datetime(2026, 7, 27, 18, 0, tzinfo=timezone(timedelta(hours=3)))
+    # 27 июля 18:30 – тестовый
+    reminder_time = datetime(2026, 7, 30, 18, 30, tzinfo=timezone(timedelta(hours=3)))
     scheduler.add_job(
         send_scheduled_message,
         DateTrigger(run_date=reminder_time),
         args=[application, "reminder_text", True]
     )
 
-    # 30 июля в 11:00 – напоминалка (только подтвердившим)
+    # 30 июля 11:00 – напоминалка (только confirmed)
     reminder_time = datetime(2026, 7, 30, 11, 0, tzinfo=timezone(timedelta(hours=3)))
     scheduler.add_job(
         send_scheduled_message,
@@ -242,12 +218,12 @@ def schedule_jobs(application: Application):
         args=[application, "reminder_text", True]
     )
 
-    # 31 июля в 10:00 – благодарность с фото (всем, кто участвовал в диалоге)
+    # 31 июля 10:00 – благодарность с фото (только confirmed)
     # thanks_time = datetime(2026, 7, 31, 10, 0, tzinfo=timezone(timedelta(hours=3)))
     # scheduler.add_job(
-    #    send_scheduled_message,
-    #    DateTrigger(run_date=thanks_time),
-    #    args=[application, "final_thanks_text", False]
+    #     send_scheduled_message,
+    #     DateTrigger(run_date=thanks_time),
+    #     args=[application, "final_thanks_text", True]
     # )
 
     return scheduler
@@ -291,42 +267,29 @@ async def export_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Участники"
-
     headers = ["ID пользователя", "Имя", "Статус"]
     ws.append(headers)
-
     for cell in ws[1]:
         cell.font = Font(bold=True)
         cell.alignment = Alignment(horizontal="center")
 
     for uid, user in registered.items():
-        ws.append([
-            uid,
-            user.get("full_name", ""),
-            "Подтвердил" if user.get("registered") else "Отказался"
-        ])
-
+        ws.append([uid, user.get("full_name", ""), "Подтвердил"])
     for col in ws.columns:
-        max_length = 0
+        max_len = 0
         col_letter = col[0].column_letter
         for cell in col:
             try:
-                if len(str(cell.value)) > max_length:
-                    max_length = len(str(cell.value))
+                if len(str(cell.value)) > max_len:
+                    max_len = len(str(cell.value))
             except:
                 pass
-        adjusted_width = min(max_length + 2, 40)
-        ws.column_dimensions[col_letter].width = adjusted_width
+        ws.column_dimensions[col_letter].width = min(max_len + 2, 40)
 
     tmp_file = "export_users.xlsx"
     wb.save(tmp_file)
-
     with open(tmp_file, "rb") as f:
-        await context.bot.send_document(
-            chat_id=update.effective_user.id,
-            document=f,
-            filename="участники.xlsx"
-        )
+        await context.bot.send_document(chat_id=update.effective_user.id, document=f, filename="участники.xlsx")
     os.remove(tmp_file)
 
 async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -334,14 +297,13 @@ async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Недостаточно прав.")
         return
     users_data = load_users()
-    registered = {k: v for k, v in users_data.items() if v.get("registered")}
-    if not registered:
-        await update.message.reply_text("Нет зарегистрированных пользователей.")
+    confirmed = {k: v for k, v in users_data.items() if v.get("registered")}
+    if not confirmed:
+        await update.message.reply_text("Нет подтвердивших участников.")
         return
     text = "📋 Список участников:\n\n"
-    for uid, data in registered.items():
-        name = data.get("full_name", "Без имени")
-        text += f"ID: `{uid}` – {name}\n"
+    for uid, data in confirmed.items():
+        text += f"ID: `{uid}` – {data.get('full_name', 'Без имени')}\n"
     await update.message.reply_text(text, parse_mode="Markdown")
 
 async def edit_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -350,11 +312,7 @@ async def edit_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     args = context.args
     if len(args) < 3:
-        await update.message.reply_text(
-            "Использование: /edit_user <user_id> <field> <new_value>\n"
-            "Поля: name, status (confirmed/declined)\n"
-            "Пример: /edit_user 123456789 name Иван Петров"
-        )
+        await update.message.reply_text("Использование: /edit_user <user_id> <field> <new_value>\nПоля: name, status (confirmed/declined)")
         return
     user_id = args[0]
     field = args[1].lower()
@@ -368,29 +326,27 @@ async def edit_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if field == "name":
         users_data[user_id]["full_name"] = new_value
         save_users(users_data)
-        await update.message.reply_text(f"Имя пользователя {user_id} обновлено.")
+        await update.message.reply_text(f"Имя обновлено.")
     elif field == "status":
         if new_value not in ["confirmed", "declined"]:
             await update.message.reply_text("Статус должен быть 'confirmed' или 'declined'.")
             return
         users_data[user_id]["registered"] = (new_value == "confirmed")
         save_users(users_data)
-        await update.message.reply_text(f"Статус пользователя {user_id} обновлён.")
+        await update.message.reply_text(f"Статус обновлён.")
     else:
         await update.message.reply_text("Недопустимое поле. Допустимые: name, status")
-
     global users
     users = load_users()
 
 # ========== Основная функция ==========
 def main():
     builder = Application.builder().token(BOT_TOKEN)
-
     if PROXY_URL:
         logger.info(f"Используется прокси: {PROXY_URL}")
         builder = builder.proxy(PROXY_URL)
     else:
-        logger.info("Прокси не задан, работаем напрямую.")
+        logger.info("Прокси не задан.")
 
     application = builder.post_init(post_init).build()
 
