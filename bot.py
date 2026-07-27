@@ -171,7 +171,8 @@ async def handle_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             texts["location_text"],
             reply_markup=keyboard,
-            disable_web_page_preview=True
+            disable_web_page_preview=True,
+            parse_mode="HTML"
         )
     elif text == texts["menu_program"]:
         await update.message.reply_text(
