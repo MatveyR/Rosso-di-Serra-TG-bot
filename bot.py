@@ -187,6 +187,9 @@ async def handle_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("Используйте кнопки меню.")
 
+async def chatid(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(f"Chat ID: {update.effective_chat.id}")
+
 # ========== Уведомления ==========
 async def send_notification(application: Application, text: str):
     if NOTIFICATION_CHAT_ID:
@@ -216,7 +219,7 @@ def schedule_jobs(application: Application):
     scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
 
     # 27 июля 18:30 – тест
-    reminder_time = datetime(2026, 7, 30, 18, 30, tzinfo=timezone(timedelta(hours=3)))
+    reminder_time = datetime(2026, 7, 27, 19, 15, tzinfo=timezone(timedelta(hours=3)))
     scheduler.add_job(
         send_scheduled_message,
         DateTrigger(run_date=reminder_time),
@@ -382,6 +385,7 @@ def main():
     application.add_handler(CommandHandler("export", export_users))
     application.add_handler(CommandHandler("list_users", list_users))
     application.add_handler(CommandHandler("edit_user", edit_user))
+    application.add_handler(CommandHandler("chatid", chatid))
 
     application.run_polling()
 
