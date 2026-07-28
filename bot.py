@@ -8,7 +8,7 @@ from apscheduler.triggers.date import DateTrigger
 import openpyxl
 from openpyxl.styles import Font, Alignment
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, ReplyKeyboardRemove, InputMediaPhoto
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -29,6 +29,17 @@ if NOTIFICATION_CHAT_ID:
 USERS_FILE = os.getenv("USERS_FILE", "users.json")
 TEXTS_FILE = os.getenv("TEXTS_FILE", "texts.json")
 PROXY_URL = os.getenv("PROXY_URL")
+
+# Пути к изображениям
+ASSETS_DIR = "assets"
+WELCOME_PHOTOS = [
+    os.path.join(ASSETS_DIR, "foto1.jpg"),
+    os.path.join(ASSETS_DIR, "foto2.jpg"),
+]
+LOCATION_PHOTOS = [
+    os.path.join(ASSETS_DIR, "foto3.jpg"),
+    os.path.join(ASSETS_DIR, "foto4.jpg"),
+]
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -57,9 +68,8 @@ ASK_NAME, ASK_CONFIRMATION = range(2)
 # ========== Клавиатуры ==========
 def get_main_menu_keyboard():
     return ReplyKeyboardMarkup([
-        [texts["menu_location"]],
-        [texts["menu_program"]],
-        [texts["menu_dresscode"]],
+        [texts["menu_location"], texts["menu_program"]],
+        [texts["menu_dresscode"], texts["menu_contact"]],
     ], resize_keyboard=True)
 
 def get_confirmation_keyboard():
@@ -68,12 +78,40 @@ def get_confirmation_keyboard():
         [texts["confirm_no"]],
     ], resize_keyboard=True)
 
+# ========== Утилита для отправки альбома ==========
+def build_media_group(photo_paths, caption=None, parse_mode=None):
+    """Открывает файлы и создаёт список InputMediaPhoto для альбома."""
+    files = []
+    media_group = []
+    for i, path in enumerate(photo_paths):
+        try:
+            f = open(path, 'rb')  # открываем без with, чтобы не закрыть до отправки
+            files.append(f)       # сохраняем ссылки для последующего закрытия
+            if i == 0 and caption:
+                media_group.append(InputMediaPhoto(f, caption=caption, parse_mode=parse_mode))
+            else:
+                media_group.append(InputMediaPhoto(f))
+        except FileNotFoundError:
+            logger.warning(f"Файл не найден: {path}")
+            # Если файл не найден, закрываем уже открытые
+            for f in files:
+                f.close()
+            return None, None
+    return media_group, files
+
+def close_files(files):
+    """Закрывает все открытые файловые объекты."""
+    for f in files:
+        try:
+            f.close()
+        except:
+            pass
+
 # ========== Обработчики регистрации ==========
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = str(update.effective_user.id)
     user_data = users.get(user_id)
 
-    # Если уже подтвердил – в меню
     if user_data and user_data.get("registered") is True:
         await update.message.reply_text(
             texts["main_menu_title"],
@@ -81,13 +119,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         )
         return ConversationHandler.END
 
-    # В остальных случаях – регистрация
-    await update.message.reply_text(
-        texts["welcome"],
-        reply_markup=ReplyKeyboardRemove(),
-        parse_mode="HTML",
-        disable_web_page_preview=True
-    )
+    # Отправляем альбом из двух фото
+    media_group, files = build_media_group(WELCOME_PHOTOS, caption=texts["welcome"], parse_mode="HTML")
+    if media_group:
+        try:
+            await update.message.reply_media_group(media=media_group)
+        finally:
+            close_files(files)
+    else:
+        await update.message.reply_text(
+            texts["welcome"],
+            parse_mode="HTML",
+            reply_markup=ReplyKeyboardRemove()
+        )
+
     await update.message.reply_text(texts["ask_name"])
     return ASK_NAME
 
@@ -165,6 +210,15 @@ async def handle_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if text == texts["menu_location"]:
+        # Отправляем альбом из двух фото (без подписи)
+        media_group, files = build_media_group(LOCATION_PHOTOS)
+        if media_group:
+            try:
+                await update.message.reply_media_group(media=media_group)
+            finally:
+                close_files(files)
+
+        # Отправляем текст с кнопкой
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton(texts["location_button"], url=texts["location_map_url"])]
         ])
@@ -174,21 +228,24 @@ async def handle_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             disable_web_page_preview=True,
             parse_mode="HTML"
         )
+
     elif text == texts["menu_program"]:
         await update.message.reply_text(
             texts["program_text"],
             parse_mode="HTML"
         )
+
     elif text == texts["menu_dresscode"]:
         await update.message.reply_text(
             texts["dresscode_text"],
             parse_mode="HTML"
         )
+
+    elif text == texts["menu_contact"]:
+        await update.message.reply_text(texts["contact_text"])
+
     else:
         await update.message.reply_text("Используйте кнопки меню.")
-
-async def chatid(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(f"Chat ID: {update.effective_chat.id}")
 
 # ========== Уведомления ==========
 async def send_notification(application: Application, text: str):
@@ -218,14 +275,6 @@ async def send_scheduled_message(application: Application, text_key: str, only_c
 def schedule_jobs(application: Application):
     scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
 
-    # 27 июля 18:30 – тест
-    reminder_time = datetime(2026, 7, 27, 19, 15, tzinfo=timezone(timedelta(hours=3)))
-    scheduler.add_job(
-        send_scheduled_message,
-        DateTrigger(run_date=reminder_time),
-        args=[application, "reminder_text", True]
-    )
-
     # 30 июля 11:00 – напоминалка (только confirmed)
     reminder_time = datetime(2026, 7, 30, 11, 0, tzinfo=timezone(timedelta(hours=3)))
     scheduler.add_job(
@@ -235,12 +284,12 @@ def schedule_jobs(application: Application):
     )
 
     # 31 июля 10:00 – благодарность с фото (только confirmed)
-    # thanks_time = datetime(2026, 7, 31, 10, 0, tzinfo=timezone(timedelta(hours=3)))
-    # scheduler.add_job(
-    #     send_scheduled_message,
-    #     DateTrigger(run_date=thanks_time),
-    #     args=[application, "final_thanks_text", True]
-    # )
+    thanks_time = datetime(2026, 7, 31, 10, 0, tzinfo=timezone(timedelta(hours=3)))
+    scheduler.add_job(
+        send_scheduled_message,
+        DateTrigger(run_date=thanks_time),
+        args=[application, "final_thanks_text", True]
+    )
 
     return scheduler
 
@@ -355,6 +404,11 @@ async def edit_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global users
     users = load_users()
 
+# ========== Команда для получения ID чата ==========
+async def chatid(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    await update.message.reply_text(f"ID этого чата: `{chat_id}`", parse_mode="Markdown")
+
 # ========== Основная функция ==========
 def main():
     builder = Application.builder().token(BOT_TOKEN)
@@ -377,7 +431,7 @@ def main():
     application.add_handler(conv_handler)
 
     application.add_handler(MessageHandler(
-        filters.Regex(f"^({texts['menu_location']}|{texts['menu_program']}|{texts['menu_dresscode']})$"),
+        filters.Regex(f"^({texts['menu_location']}|{texts['menu_program']}|{texts['menu_dresscode']}|{texts['menu_contact']})$"),
         handle_main_menu
     ))
 
