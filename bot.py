@@ -276,20 +276,20 @@ def schedule_jobs(application: Application):
     scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
 
     # 30 июля 11:00 – напоминалка (только confirmed)
-    reminder_time = datetime(2026, 7, 30, 11, 0, tzinfo=timezone(timedelta(hours=3)))
+    reminder_time = datetime(2026, 7, 30, 12, 0, tzinfo=timezone(timedelta(hours=3)))
     scheduler.add_job(
         send_scheduled_message,
         DateTrigger(run_date=reminder_time),
-        args=[application, "reminder_text", True]
+        args=[application, "rainy_day", True]
     )
 
     # 31 июля 10:00 – благодарность с фото (только confirmed)
-    thanks_time = datetime(2026, 7, 31, 10, 0, tzinfo=timezone(timedelta(hours=3)))
-    scheduler.add_job(
-        send_scheduled_message,
-        DateTrigger(run_date=thanks_time),
-        args=[application, "final_thanks_text", True]
-    )
+    # thanks_time = datetime(2026, 7, 31, 10, 0, tzinfo=timezone(timedelta(hours=3)))
+    # scheduler.add_job(
+    #     send_scheduled_message,
+    #     DateTrigger(run_date=thanks_time),
+    #    args=[application, "final_thanks_text", True]
+    # )
 
     return scheduler
 
