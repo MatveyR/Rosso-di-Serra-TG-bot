@@ -283,13 +283,12 @@ def schedule_jobs(application: Application):
         args=[application, "rainy_day", True]
     )
 
-    # 31 июля 10:00 – благодарность с фото (только confirmed)
-    # thanks_time = datetime(2026, 7, 31, 10, 0, tzinfo=timezone(timedelta(hours=3)))
-    # scheduler.add_job(
-    #     send_scheduled_message,
-    #     DateTrigger(run_date=thanks_time),
-    #    args=[application, "final_thanks_text", True]
-    # )
+    thanks_time = datetime(2026, 8, 4, 16, 0, tzinfo=timezone(timedelta(hours=3)))
+    scheduler.add_job(
+        send_scheduled_message,
+        DateTrigger(run_date=thanks_time),
+       args=[application, "final_thanks_text", True]
+    )
 
     return scheduler
 
